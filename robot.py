@@ -186,7 +186,7 @@ class Robot(Job):
             while wcf.is_receiving_msg():
                 try:
                     msg = wcf.get_msg()
-                    self.LOG.info(msg)
+                    # self.LOG.info(msg)
                     self.processMsg(msg)
                 except Empty:
                     continue  # Empty message
