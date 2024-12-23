@@ -1,0 +1,16 @@
+[
+  {
+    "cron": "23:59",
+    "receivers": [
+      {
+        "receiver": "filehelper",
+        "params": "浦东"
+      },
+      {
+        "receiver": "wx_id",
+        "params": "颍上"
+      }
+    ],
+    "plugin": "plugins/corn/weather.py"
+  }
+]

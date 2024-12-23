@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import json
 import logging
 import re
 import time
@@ -20,6 +20,8 @@ from base.func_xinghuo_web import XinghuoWeb
 from configuration import Config
 from constants import ChatType
 from job_mgmt import Job
+import importlib
+import importlib.util
 
 __version__ = "39.2.4.0"
 
@@ -169,7 +171,6 @@ class Robot(Job):
             else:
                 self.toChitchat(msg)  # 闲聊
 
-
     def enableReceivingMsg(self) -> None:
         def innerProcessMsg(wcf: Wcf):
             while wcf.is_receiving_msg():
@@ -252,3 +253,25 @@ class Robot(Job):
         news = News().get_important_news()
         for r in receivers:
             self.sendTextMsg(news, r)
+
+    def start_cron(self):
+        with open("plugins/corn/main.json", "r", encoding="UTF-8") as file:
+            plugins = json.load(file)
+        if plugins is None:
+            return
+        for plugin in plugins:
+            corn = plugin['cron']
+            receivers = plugin['receivers']
+            plugin_dir = plugin['plugin']
+            if corn is None or len(receivers) == 0 or plugin_dir is None:
+                continue
+            spec = importlib.util.spec_from_file_location("main", plugin_dir)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            for receiver in receivers:
+                receiver_user = receiver['receiver']
+                params = receiver['params']
+                self.onEveryTime(corn, module.main, params)
+
+            print(plugin)
