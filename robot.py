@@ -265,13 +265,14 @@ class Robot(Job):
             plugin_dir = plugin['plugin']
             if corn is None or len(receivers) == 0 or plugin_dir is None:
                 continue
-            spec = importlib.util.spec_from_file_location("main", plugin_dir)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
             for receiver in receivers:
                 receiver_user = receiver['receiver']
                 params = receiver['params']
-                self.onEveryTime(corn, module.main, params)
+                self.onEveryTime(corn, self.execute_corn, receiver=receiver_user, plugin_dir=plugin_dir, params=params)
 
-            print(plugin)
+    def execute_corn(self, receiver, plugin_dir, params):
+        spec = importlib.util.spec_from_file_location("main", plugin_dir)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        re = module.main(params)
+        self.sendTextMsg(re, receiver)

@@ -5,8 +5,8 @@
 # @Author   : ZhouMiLi
 # @Date     : 2024/12/23
 
-from weathers.api import get_by_guess
+from spiders.wearher import get_by_guess_str
 
 
 def main(pcc_name: str):
-    return get_by_guess(pcc_name)
+    return get_by_guess_str(pcc_name)

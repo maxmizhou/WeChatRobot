@@ -1,6 +1,6 @@
 [
   {
-    "cron": "23:59",
+    "cron": "21:17",
     "receivers": [
       {
         "receiver": "filehelper",
