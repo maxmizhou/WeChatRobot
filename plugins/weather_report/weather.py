@@ -44,21 +44,22 @@ def parse(weather_data):
     return weather_infos
 
 
+def __create_pretty_table__():
+    pretty_table = PrettyTable(["日期", "天气状况", "温度", "风向"])
+    pretty_table.align["日期"] = "l"
+    pretty_table.padding_width = 1
+    return pretty_table
+
+
 class Weather(object):
     def __init__(self, weather_data, day_index):
         self.weather_infos_ = parse(weather_data)
         self.day_index_ = day_index
-        self.__create_pretty_table()
-
-    def __create_pretty_table(self):
-        pretty_table = PrettyTable(["日期", "天气状况", "温度", "风向"])
-        pretty_table.align["日期"] = "l"
-        pretty_table.padding_width = 1
-        return pretty_table
+        __create_pretty_table__()
 
     @property
     def weather(self):
-        pretty_table = self.__create_pretty_table()
+        pretty_table = __create_pretty_table__()
         if 1 <= self.day_index_ <= 7:
             weather_info = self.weather_infos_[self.day_index_ - 1]
             pretty_table.add_row([weather_info.date_, weather_info.day_wea_,
