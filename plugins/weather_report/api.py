@@ -6,7 +6,8 @@
 # @Date     : 2024/12/23
 import requests
 
-from plugins.weather_report.util import get_city_code, guess_province_city_county
+from plugins.weather_report import url, headers
+from plugins.weather_report.util import guess_province_city_county
 from plugins.weather_report.weather import Weather
 
 
@@ -16,19 +17,16 @@ def get_by_guess(pcc_name, day_index=1):
         return f"未查询到<{pcc_name}>天气"
     weather_str = get(city_id, day_index)
     weather_str = "\n".join(["".join(guess_address), weather_str])
-    print(weather_str)
     return weather_str
 
 
 def get(city_id, day_index=1):
-    url = "http://www.weather.com.cn/weather/{city_id}.shtml".format(city_id=city_id)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"}
-    r = requests.get(url, headers=headers)
+    r = requests.get(url.format(city_id=city_id), headers=headers)
     if r.status_code == 200:
         wea = Weather(r.content, day_index)
         return wea.weather
-    return "为查询到天气"
+    return "未查询到天气"
 
 
-get_by_guess("阜阳")
+if __name__ == "__main__":
+    print(get_by_guess("颍上"))
