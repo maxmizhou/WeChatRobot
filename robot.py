@@ -75,6 +75,7 @@ class Robot(Job):
         self.LOG.info(f"已选择: {self.chat}")
 
     def __load_functions__(self):
+        start_time = time.time()
         for file_path in os.listdir(self.base_dir):
             if not file_path.endswith(".py"):
                 continue
@@ -110,6 +111,8 @@ class Robot(Job):
                         except (ImportError, AttributeError) as e:
                             print(f"Error importing module {module_name}: {e}")
                             continue
+        elapsed_time = time.time() - start_time
+        self.LOG.info(f"已加载:{len(self.functions)}个插件用时:{elapsed_time:.4f}秒")
 
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -306,12 +309,4 @@ class Robot(Job):
             self.sendTextMsg(result, receiver)
 
     def to_keyword_plugin(self, msg: WxMsg):
-        for fun in self.functions:
-            result = fun(self.wcf, msg)
-            if len(result):
-                if msg.from_group():
-                    self.sendTextMsg(result, msg.roomid, msg.sender)
-                else:
-                    self.sendTextMsg(result, msg.sender)
-                return True
-        return False
+        return any([fun(self.wcf, msg) for fun in self.functions])
