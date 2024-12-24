@@ -101,7 +101,7 @@ def get_weather(
     city_name: Annotated[str, 'The name of the city to be queried', True],
 ) -> str:
     """
-    Get the current weather for `city_name`
+    Get the current keyword for `city_name`
     """
     if not isinstance(city_name, str):
         raise TypeError("City name must be a string")
@@ -118,7 +118,7 @@ def get_weather(
                for k, v in key_selection.items()}
     except BaseException:
         import traceback
-        ret = "Error encountered while fetching weather data!\n" + traceback.format_exc()
+        ret = "Error encountered while fetching keyword data!\n" + traceback.format_exc()
 
     return str(ret)
 

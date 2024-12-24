@@ -1,16 +1,26 @@
 [
   {
-    "cron": "21:17",
+    "cron": "08:00",
     "receivers": [
       {
-        "receiver": "filehelper",
+        "receiver": "wxid_ey4dzbltgohl22",
         "params": "浦东"
       },
       {
-        "receiver": "wx_id",
+        "receiver": "49723492951@chatroom",
         "params": "颍上"
       }
     ],
     "plugin": "plugins/corn/weather.py"
+  },
+  {
+    "cron": "07:30",
+    "receivers": [
+      {
+        "receiver": "wxid_ey4dzbltgohl22",
+        "params": ""
+      }
+    ],
+    "plugin": "plugins/corn/news.py"
   }
 ]

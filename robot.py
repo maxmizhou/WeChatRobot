@@ -1,27 +1,27 @@
 # -*- coding: utf-8 -*-
+import importlib
+import importlib.util
 import json
 import logging
+import os
 import re
 import time
 import xml.etree.ElementTree as ET
 from queue import Empty
 from threading import Thread
-from base.func_zhipu import ZhiPu
 
 from wcferry import Wcf, WxMsg
-
+import ast
 from base.func_bard import BardAssistant
 from base.func_chatglm import ChatGLM
 from base.func_chatgpt import ChatGPT
 from base.func_chengyu import cy
-from base.func_news import News
 from base.func_tigerbot import TigerBot
 from base.func_xinghuo_web import XinghuoWeb
+from base.func_zhipu import ZhiPu
 from configuration import Config
 from constants import ChatType
 from job_mgmt import Job
-import importlib
-import importlib.util
 
 __version__ = "39.2.4.0"
 
@@ -31,12 +31,14 @@ class Robot(Job):
     """
 
     def __init__(self, config: Config, wcf: Wcf, chat_type: int) -> None:
+        self.base_dir = "plugins/keyword"
         self.wcf = wcf
         self.config = config
         self.LOG = logging.getLogger("Robot")
         self.wxid = self.wcf.get_self_wxid()
-        self.allContacts = self.getAllContacts()
-
+        self.allContacts = self.wcf.get_contacts()
+        self.functions = []
+        self.__load_functions__()
         if ChatType.is_in_chat_types(chat_type):
             if chat_type == ChatType.TIGER_BOT.value and TigerBot.value_check(self.config.TIGERBOT):
                 self.chat = TigerBot(self.config.TIGERBOT)
@@ -71,6 +73,43 @@ class Robot(Job):
                 self.chat = None
 
         self.LOG.info(f"已选择: {self.chat}")
+
+    def __load_functions__(self):
+        for file_path in os.listdir(self.base_dir):
+            if not file_path.endswith(".py"):
+                continue
+            full_path = self.base_dir + "/" + file_path
+            module_name = os.path.splitext(full_path)[0]  # 获取模块名，去掉文件扩展名
+            try:
+                # 打开文件并读取内容
+                with open(full_path, "r", encoding="utf-8") as file:
+                    tree = ast.parse(file.read(), filename=file_path)
+            except (FileNotFoundError, IOError) as e:
+                print(f"Error reading file {full_path}: {e}")
+                continue
+
+            # 查找符合条件的函数
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    if (node.name == "execute" and
+                            len(node.args.args) == 2 and
+                            node.args.args[0].arg == "wcf" and
+                            node.args.args[1].arg == "msg" and
+                            isinstance(node.args.args[0].annotation, ast.Name) and
+                            isinstance(node.args.args[1].annotation, ast.Name) and
+                            node.args.args[0].annotation.id == "Wcf" and
+                            node.args.args[1].annotation.id == "WxMsg" and
+                            isinstance(node.returns, ast.Name) and
+                            node.returns.id == "bool"):
+                        # 动态导入模块
+                        try:
+                            spec = importlib.util.spec_from_file_location("execute", full_path)
+                            module = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(module)
+                            self.functions.append(getattr(module, "execute"))
+                        except (ImportError, AttributeError) as e:
+                            print(f"Error importing module {module_name}: {e}")
+                            continue
 
     @staticmethod
     def value_check(args: dict) -> bool:
@@ -116,7 +155,7 @@ class Robot(Job):
         """闲聊，接入 ChatGPT
         """
         if not self.chat:  # 没接 ChatGPT，固定回复
-            rsp = "你@我干嘛？"
+            rsp = None
         else:  # 接了 ChatGPT，智能回复
             q = re.sub(r"@.*?[\u2005|\s]", "", msg.content).replace(" ", "")
             rsp = self.chat.get_answer(q, (msg.roomid if msg.from_group() else msg.sender))
@@ -141,7 +180,20 @@ class Robot(Job):
         self.sendTextMsg(content, receivers, msg.sender)
         """
 
-        # 群聊消息
+        # 来自非群聊的特殊消息处理
+        if not msg.from_group():
+            # 自动通过好友申请请求
+            if msg.type == 37 and True:
+                self.autoAcceptFriendRequest(msg)
+                return
+            if msg.type == 10000:
+                self.sayHiToNewFriend(msg)
+                return
+
+                # 群聊消息
+        if self.to_keyword_plugin(msg):
+            return
+
         if msg.from_group():
             # 如果在群里被 @
             if msg.roomid not in self.config.GROUPS:  # 不在配置的响应的群列表里，忽略
@@ -154,15 +206,7 @@ class Robot(Job):
                 self.toChengyu(msg)
 
             return  # 处理完群聊信息，后面就不需要处理了
-
-        # 非群聊信息，按消息类型进行处理
-        if msg.type == 37:  # 好友请求
-            self.autoAcceptFriendRequest(msg)
-
-        elif msg.type == 10000:  # 系统信息
-            self.sayHiToNewFriend(msg)
-
-        elif msg.type == 0x01:  # 文本消息
+        if msg.type == 0x01:  # 文本消息
             # 让配置加载更灵活，自己可以更新配置。也可以利用定时任务更新。
             if msg.from_self():
                 if msg.content == "^更新$":
@@ -211,14 +255,6 @@ class Robot(Job):
             self.LOG.info(f"To {receiver}: {ats}\r{msg}")
             self.wcf.send_text(f"{ats}\n\n{msg}", receiver, at_list)
 
-    def getAllContacts(self) -> dict:
-        """
-        获取联系人（包括好友、公众号、服务号、群成员……）
-        格式: {"wxid": "NickName"}
-        """
-        contacts = self.wcf.query_sql("MicroMsg.db", "SELECT UserName, NickName FROM Contact;")
-        return {contact["UserName"]: contact["NickName"] for contact in contacts}
-
     def keepRunningAndBlockProcess(self) -> None:
         """
         保持机器人运行，不让进程退出
@@ -239,20 +275,11 @@ class Robot(Job):
             self.LOG.error(f"同意好友出错：{e}")
 
     def sayHiToNewFriend(self, msg: WxMsg) -> None:
-        nickName = re.findall(r"你已添加了(.*)，现在可以开始聊天了。", msg.content)
-        if nickName:
+        nick_name = re.findall(r"你已添加了(.*)，现在可以开始聊天了。", msg.content)
+        if nick_name:
             # 添加了好友，更新好友列表
-            self.allContacts[msg.sender] = nickName[0]
-            self.sendTextMsg(f"Hi {nickName[0]}，我自动通过了你的好友请求。", msg.sender)
-
-    def newsReport(self) -> None:
-        receivers = self.config.NEWS
-        if not receivers:
-            return
-
-        news = News().get_important_news()
-        for r in receivers:
-            self.sendTextMsg(news, r)
+            self.allContacts.append(self.wcf.get_info_by_wxid(msg.sender))
+            self.sendTextMsg(f"Hi {nick_name[0]} 。", msg.sender)
 
     def start_cron(self):
         with open("plugins/corn/main.json", "r", encoding="UTF-8") as file:
@@ -271,8 +298,20 @@ class Robot(Job):
                 self.onEveryTime(corn, self.execute_corn, receiver=receiver_user, plugin_dir=plugin_dir, params=params)
 
     def execute_corn(self, receiver, plugin_dir, params):
-        spec = importlib.util.spec_from_file_location("main", plugin_dir)
+        spec = importlib.util.spec_from_file_location("execute", plugin_dir)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        re = module.main(params)
-        self.sendTextMsg(re, receiver)
+        result = module.execute(params)
+        if result is not None and len(result) > 0:
+            self.sendTextMsg(result, receiver)
+
+    def to_keyword_plugin(self, msg: WxMsg):
+        for fun in self.functions:
+            result = fun(self.wcf, msg)
+            if len(result):
+                if msg.from_group():
+                    self.sendTextMsg(result, msg.roomid, msg.sender)
+                else:
+                    self.sendTextMsg(result, msg.sender)
+                return True
+        return False
