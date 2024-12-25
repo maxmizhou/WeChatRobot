@@ -3,12 +3,11 @@
 
 import signal
 from argparse import ArgumentParser
-
-from base.func_report_reminder import ReportReminder
+from wcferry import Wcf
 from configuration import Config
 from constants import ChatType
 from robot import Robot, __version__
-from wcferry import Wcf
+from storage import __init_tables__
 
 
 def weather_report(robot: Robot) -> None:
@@ -28,6 +27,8 @@ def weather_report(robot: Robot) -> None:
 
 def main(chat_type: int):
     config = Config()
+    # 初始化数据库
+    engine = __init_tables__(config.DATA)
     wcf = Wcf(debug=False)
 
     def handler(sig, frame):
@@ -36,7 +37,7 @@ def main(chat_type: int):
 
     signal.signal(signal.SIGINT, handler)
 
-    robot = Robot(config, wcf, chat_type)
+    robot = Robot(config, wcf, engine, chat_type)
     robot.LOG.info(f"WeChatRobot【{__version__}】成功启动···")
 
     # 机器人启动发送测试消息

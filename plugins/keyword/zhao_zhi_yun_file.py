@@ -8,20 +8,25 @@ import os
 import sqlite3
 import csv
 from datetime import datetime
+
+from sqlalchemy.orm import sessionmaker
 from wcferry import WxMsg, Wcf
+
+from plugins.keyword.params import KeyWordParams
+from storage.tables.entity.chat import ChatAutoDownload
 
 auto_download = False
 msg_dict = {}
-conn=None
+conn = None
 
-def execute(wcf: Wcf, msg: WxMsg) -> bool:
-    if not msg.from_group() or "49723492951@chatroom" != msg.roomid:
-        return False
-    if msg.is_text():
-        return __group_text__(wcf, msg)
-    if msg.type == 3 or msg.type == 43:
-        return __group_download_file__(wcf, msg, msg.type)
 
+def execute(param: KeyWordParams) -> bool:
+    # 文本消息
+    if param.msg.is_text():
+        return __group_text__(param)
+    # 文件消息
+    if param.msg.type == 3 or param.msg.type == 43:
+        return __group_download_file__(param)
     return False
 
 
@@ -41,12 +46,13 @@ def __get_the_path__(msg_id: int):
         return ""
 
 
-def __group_download_file__(wcf: Wcf, msg: WxMsg, type: int):
-    thumb = msg.thumb
+def __group_download_file__(param: KeyWordParams):
+    thumb = param.msg.thumb
     if thumb is None or len(thumb) <= 0:
         return False
+    if not __get_
+
     if not auto_download:
-        msg_dict[msg.id] = msg
         wcf.send_text(f"upload\n{msg.id}", msg.roomid)
         return True
     if type == 3:
@@ -68,16 +74,23 @@ def __group_download_file__(wcf: Wcf, msg: WxMsg, type: int):
     return False
 
 
-def __group_text__(wcf: Wcf, msg: WxMsg):
-    constr = msg.content
+def __group_text__(param: KeyWordParams):
+    constr = param.msg.content
+    if not constr:
+        return False
     if "开启自动下载" == constr or "关闭自动下载" == constr:
-        if "开启自动下载" == constr:
-            auto_download = True
-        if "关闭自动下载" == constr:
-            auto_download = False
-        wcf.send_text(constr + "成功", msg.roomid)
+        with sessionmaker(bind=param.engine)() as session:
+            auto = session.query(ChatAutoDownload).first()
+            if "开启自动下载" == constr and auto.auto == 0:
+                auto.auto = 1
+                session.commit()
+            if "关闭自动下载" == constr and auto.auto == 1:
+                auto.auto = 0
+                session.commit()
+        param.wcf.send_text(constr + "成功", param.msg.roomid)
         return True
     return False
 
-def __update_auto_download__(auto: bool):
 
+def __update_auto_download__(auto: bool):
+    pass

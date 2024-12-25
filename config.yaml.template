@@ -82,3 +82,9 @@ bard: # -----bard配置这行不填-----
 zhipu:  # -----zhipu配置这行不填-----
   api_key:  #api key
   model:   # 模型类型
+data:
+    type: mysql
+    database: mi_zhou_bot
+    host: localhost:3306
+    username: root
+    password: Ch1sx@Tt2ac

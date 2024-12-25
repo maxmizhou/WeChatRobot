@@ -17,3 +17,5 @@ google-generativeai
 zhipuai
 beautifulsoup4
 prettytable
+sqlalchemy
+mysqlclient

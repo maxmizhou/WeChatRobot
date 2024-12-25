@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
+import ast
 import importlib
 import importlib.util
-import json
 import logging
 import os
 import re
@@ -9,9 +9,8 @@ import time
 import xml.etree.ElementTree as ET
 from queue import Empty
 from threading import Thread
-
+from sqlalchemy.orm import sessionmaker
 from wcferry import Wcf, WxMsg
-import ast
 from base.func_bard import BardAssistant
 from base.func_chatglm import ChatGLM
 from base.func_chatgpt import ChatGPT
@@ -25,13 +24,17 @@ from job_mgmt import Job
 
 __version__ = "39.2.4.0"
 
+from plugins.keyword.params import KeyWordParams
+
+from storage.tables.entity.chat import ChatPlugin
+
 
 class Robot(Job):
     """个性化自己的机器人
     """
 
-    def __init__(self, config: Config, wcf: Wcf, chat_type: int) -> None:
-        self.base_dir = "plugins/keyword"
+    def __init__(self, config: Config, wcf: Wcf, engine, chat_type: int, ) -> None:
+        self.engine = engine
         self.wcf = wcf
         self.config = config
         self.LOG = logging.getLogger("Robot")
@@ -76,38 +79,38 @@ class Robot(Job):
 
     def __load_functions__(self):
         start_time = time.time()
-        for file_path in os.listdir(self.base_dir):
-            if not file_path.endswith(".py"):
+        with sessionmaker(bind=self.engine)() as session:
+            plugins = session.query(ChatPlugin).filter_by(plugin_type=2).all()
+        if not plugins:
+            return
+        for plugin in plugins:
+            if not plugin.path.endswith(".py"):
                 continue
-            full_path = self.base_dir + "/" + file_path
-            module_name = os.path.splitext(full_path)[0]  # 获取模块名，去掉文件扩展名
+            file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), plugin.path)
             try:
                 # 打开文件并读取内容
-                with open(full_path, "r", encoding="utf-8") as file:
+                with open(file_path, "r", encoding="utf-8") as file:
                     tree = ast.parse(file.read(), filename=file_path)
             except (FileNotFoundError, IOError) as e:
-                print(f"Error reading file {full_path}: {e}")
+                print(f"Error reading file {plugin.path}: {e}")
                 continue
-
+            module_name = file_path[:-3]
             # 查找符合条件的函数
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
                     if (node.name == "execute" and
-                            len(node.args.args) == 2 and
-                            node.args.args[0].arg == "wcf" and
-                            node.args.args[1].arg == "msg" and
+                            len(node.args.args) == 1 and
+                            node.args.args[0].arg == "param" and
                             isinstance(node.args.args[0].annotation, ast.Name) and
-                            isinstance(node.args.args[1].annotation, ast.Name) and
-                            node.args.args[0].annotation.id == "Wcf" and
-                            node.args.args[1].annotation.id == "WxMsg" and
+                            node.args.args[0].annotation.id == "KeyWordParams" and
                             isinstance(node.returns, ast.Name) and
                             node.returns.id == "bool"):
                         # 动态导入模块
                         try:
-                            spec = importlib.util.spec_from_file_location("execute", full_path)
+                            spec = importlib.util.spec_from_file_location("execute", file_path)
                             module = importlib.util.module_from_spec(spec)
                             spec.loader.exec_module(module)
-                            self.functions.append(getattr(module, "execute"))
+                            self.functions.append({plugin: getattr(module, "execute")})
                         except (ImportError, AttributeError) as e:
                             print(f"Error importing module {module_name}: {e}")
                             continue
@@ -285,20 +288,18 @@ class Robot(Job):
             self.sendTextMsg(f"Hi {nick_name[0]} 。", msg.sender)
 
     def start_cron(self):
-        with open("plugins/corn/main.json", "r", encoding="UTF-8") as file:
-            plugins = json.load(file)
-        if plugins is None:
+        # 创建会话类
+        with sessionmaker(bind=self.engine)() as session:
+            plugins = session.query(ChatPlugin).filter_by(plugin_type=1).all()
+        if not plugins:
             return
         for plugin in plugins:
-            corn = plugin['cron']
-            receivers = plugin['receivers']
-            plugin_dir = plugin['plugin']
-            if corn is None or len(receivers) == 0 or plugin_dir is None:
-                continue
-            for receiver in receivers:
-                receiver_user = receiver['receiver']
-                params = receiver['params']
-                self.onEveryTime(corn, self.execute_corn, receiver=receiver_user, plugin_dir=plugin_dir, params=params)
+            corn = plugin.cron
+            receiver = plugin.receiver
+            plugin_dir = plugin.path
+            params = plugin.params
+            if not receiver or len(str(receiver)) <= 0:
+                self.onEveryTime(corn, self.execute_corn, receiver=receiver, plugin_dir=plugin_dir, params=params)
 
     def execute_corn(self, receiver, plugin_dir, params):
         spec = importlib.util.spec_from_file_location("execute", plugin_dir)
@@ -306,7 +307,43 @@ class Robot(Job):
         spec.loader.exec_module(module)
         result = module.execute(params)
         if result is not None and len(result) > 0:
-            self.sendTextMsg(result, receiver)
+            for ree in receiver.spilt(","):
+                self.sendTextMsg(result, ree)
 
     def to_keyword_plugin(self, msg: WxMsg):
-        return any([fun(self.wcf, msg) for fun in self.functions])
+        for plugin_dict in self.functions:
+            for plugin, func in plugin_dict.items():
+                if not self.__auth_room_id_and_sender_id(plugin.roomId, plugin.senderId, msg.roomid, msg.sender):
+                    continue
+                if func(KeyWordParams(self.wcf, msg, self.engine)):
+                    return True
+
+    @staticmethod
+    def __auth_room_id_and_sender_id(room_ids: str, sender_ids: str, room_id: str, sender: str) -> bool:
+        """
+        验证消息的 room_id 和 sender 是否有权限执行插件。
+
+        :param room_ids: 允许的 room_id 列表（逗号分隔）
+        :param sender_ids: 允许的 sender 列表（逗号分隔）
+        :param room_id: 消息的 room_id
+        :param sender: 消息的 sender
+        :return: 是否有权限
+        """
+        # 将逗号分隔的字符串转换为集合
+        allowed_rooms = set(room_ids.split(",")) if room_ids else set()
+        allowed_senders = set(sender_ids.split(",")) if sender_ids else set()
+
+        # 私聊消息
+        if not room_id:
+            return sender in allowed_senders
+
+        # 群聊消息
+        if room_id not in allowed_rooms:
+            return False
+
+        # 如果 sender_ids 为空，则允许所有 sender
+        if not sender_ids:
+            return True
+
+        # 检查 sender 是否在允许的列表中
+        return sender in allowed_senders
