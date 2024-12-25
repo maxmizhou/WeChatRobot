@@ -25,6 +25,28 @@ class ChatFile(Base):
 
 """
 聊天消息记录
+        self._is_self = msg.is_self
+        self._is_group = msg.is_group
+        self.type = msg.type
+        self.id = msg.id
+        self.ts = msg.ts
+        
+        self.sign = msg.sign
+        self.xml = msg.xml
+        self.sender = msg.sender
+        self.roomid = msg.roomid
+        self.content = msg.content
+        self.thumb = msg.thumb
+        self.extra = msg.extra
+        
+        type (int): 消息类型，可通过 `get_msg_types` 获取
+        id (str): 消息 id
+        xml (str): 消息 xml 部分
+        sender (str): 消息发送人
+        roomid (str): （仅群消息有）群 id
+        content (str): 消息内容
+        thumb (str): 视频或图片消息的缩略图路径
+        extra (str): 视频或图片消息的路径
 """
 
 
@@ -32,8 +54,18 @@ class ChatMessage(Base):
     __tablename__ = 'chat_message'
 
     id = Column(Integer, primary_key=True)  # 主键
+    is_self = Column(Integer, nullable=True)
+    is_group = Column(Integer, nullable=True)
+    type = Column(Integer, nullable=True)
     msgId = Column(BigInteger, nullable=True)  # 消息ID
-    message = Column(Text, nullable=True)  # 消息体
+    ts = Column(BigInteger, nullable=True)
+    sign = Column(String(255), nullable=True)
+    xml = Column(Text, nullable=True)
+    sender = Column(String(100), nullable=True)
+    room_id = Column(String(100), nullable=True)
+    content = Column(Text, nullable=True)
+    thumb = Column(String(255), nullable=True)
+    extra = Column(String(255), nullable=True)
     create_date = Column(DateTime, default=datetime.now())
 
 
@@ -55,8 +87,14 @@ class ChatPlugin(Base):
     cron = Column(String(100), nullable=True)  # 定时时间
 
 
-class ChatAutoDownload(Base):
+"""
+标识 常量
+"""
+
+
+class ChatStatus(Base):
     __tablename__ = 'chat_auto_download'
 
     id = Column(Integer, primary_key=True)  # 主键
-    auto = Column(Integer, nullable=True)
+    key = Column(String(100), nullable=True)
+    status = Column(Integer, nullable=True)

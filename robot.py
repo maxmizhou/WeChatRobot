@@ -21,12 +21,13 @@ from base.func_zhipu import ZhiPu
 from configuration import Config
 from constants import ChatType
 from job_mgmt import Job
+import json
 
 __version__ = "39.2.4.0"
 
 from plugins.keyword.params import KeyWordParams
 
-from storage.tables.entity.chat import ChatPlugin
+from storage.tables.entity.chat import ChatPlugin, ChatMessage
 
 
 class Robot(Job):
@@ -34,13 +35,14 @@ class Robot(Job):
     """
 
     def __init__(self, config: Config, wcf: Wcf, engine, chat_type: int, ) -> None:
+        self.base_dir = "plugins/keyword"
         self.engine = engine
         self.wcf = wcf
         self.config = config
         self.LOG = logging.getLogger("Robot")
         self.wxid = self.wcf.get_self_wxid()
         self.allContacts = self.wcf.get_contacts()
-        self.functions = []
+        self.functions = {}
         self.__load_functions__()
         if ChatType.is_in_chat_types(chat_type):
             if chat_type == ChatType.TIGER_BOT.value and TigerBot.value_check(self.config.TIGERBOT):
@@ -81,39 +83,46 @@ class Robot(Job):
         start_time = time.time()
         with sessionmaker(bind=self.engine)() as session:
             plugins = session.query(ChatPlugin).filter_by(plugin_type=2).all()
-        if not plugins:
-            return
-        for plugin in plugins:
-            if not plugin.path.endswith(".py"):
-                continue
-            file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), plugin.path)
-            try:
-                # 打开文件并读取内容
-                with open(file_path, "r", encoding="utf-8") as file:
-                    tree = ast.parse(file.read(), filename=file_path)
-            except (FileNotFoundError, IOError) as e:
-                print(f"Error reading file {plugin.path}: {e}")
-                continue
-            module_name = file_path[:-3]
-            # 查找符合条件的函数
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    if (node.name == "execute" and
-                            len(node.args.args) == 1 and
-                            node.args.args[0].arg == "param" and
-                            isinstance(node.args.args[0].annotation, ast.Name) and
-                            node.args.args[0].annotation.id == "KeyWordParams" and
-                            isinstance(node.returns, ast.Name) and
-                            node.returns.id == "bool"):
-                        # 动态导入模块
-                        try:
-                            spec = importlib.util.spec_from_file_location("execute", file_path)
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
-                            self.functions.append({plugin: getattr(module, "execute")})
-                        except (ImportError, AttributeError) as e:
-                            print(f"Error importing module {module_name}: {e}")
-                            continue
+        py_files = [f for f in os.listdir(self.base_dir) if f.endswith('.py')]
+        plugin_filenames = {os.path.basename(str(plugin.path)) for plugin in plugins}
+        new_py = [py for py in py_files if os.path.basename(py) not in plugin_filenames]
+        for py in new_py:
+            plugins.append(ChatPlugin(path=os.path.join(self.base_dir, py), plugin_type=2))
+        with sessionmaker(bind=self.engine)() as session:
+            for plugin in plugins:
+                if not plugin.path.endswith(".py"):
+                    continue
+                file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), plugin.path)
+                try:
+                    # 打开文件并读取内容
+                    with open(file_path, "r", encoding="utf-8") as file:
+                        tree = ast.parse(file.read(), filename=file_path)
+                except (FileNotFoundError, IOError) as e:
+                    print(f"Error reading file {plugin.path}: {e}")
+                    continue
+                module_name = file_path[:-3]
+                # 查找符合条件的函数
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef):
+                        if (node.name == "execute" and
+                                len(node.args.args) == 1 and
+                                node.args.args[0].arg == "param" and
+                                isinstance(node.args.args[0].annotation, ast.Name) and
+                                node.args.args[0].annotation.id == "KeyWordParams" and
+                                isinstance(node.returns, ast.Name) and
+                                node.returns.id == "bool"):
+                            # 动态导入模块
+                            try:
+                                if not plugin.id:
+                                    session.add(ChatPlugin(path=plugin.path, plugin_type=2))
+                                    session.commit()
+                                spec = importlib.util.spec_from_file_location("execute", file_path)
+                                module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(module)
+                                self.functions[plugin.id] = getattr(module, "execute")
+                            except (ImportError, AttributeError) as e:
+                                print(f"Error importing module {module_name}: {e}")
+                                continue
         elapsed_time = time.time() - start_time
         self.LOG.info(f"已加载:{len(self.functions)}个插件用时:{elapsed_time:.4f}秒")
 
@@ -185,7 +194,14 @@ class Robot(Job):
         receivers = msg.roomid
         self.sendTextMsg(content, receivers, msg.sender)
         """
-
+        # 记录消息
+        with sessionmaker(bind=self.engine)() as session:
+            message = ChatMessage(is_self=int(msg.from_self()), is_group=int(msg.from_group()), type=msg.type, msgId=msg.id, ts=msg.ts,
+                                  sign=msg.sign, xml=msg.xml, sender=msg.sender, room_id=msg.roomid,
+                                  content=msg.content,
+                                  thumb=msg.thumb, extra=msg.extra)
+            session.add(message)
+            session.commit()
         # 来自非群聊的特殊消息处理
         if not msg.from_group():
             # 自动通过好友申请请求
@@ -311,12 +327,15 @@ class Robot(Job):
                 self.sendTextMsg(result, ree)
 
     def to_keyword_plugin(self, msg: WxMsg):
-        for plugin_dict in self.functions:
-            for plugin, func in plugin_dict.items():
-                if not self.__auth_room_id_and_sender_id(plugin.roomId, plugin.senderId, msg.roomid, msg.sender):
-                    continue
-                if func(KeyWordParams(self.wcf, msg, self.engine)):
-                    return True
+        with sessionmaker(bind=self.engine)() as session:
+            plugins = session.query(ChatPlugin).filter_by(plugin_type=2).all()
+        for plugin in plugins:
+            if not self.__auth_room_id_and_sender_id(plugin.roomId, plugin.senderId, msg.roomid, msg.sender):
+                continue
+            func = self.functions[plugin.id]
+            if func and func(KeyWordParams(self.wcf, msg, self.engine)):
+                return True
+        return False
 
     @staticmethod
     def __auth_room_id_and_sender_id(room_ids: str, sender_ids: str, room_id: str, sender: str) -> bool:
