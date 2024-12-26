@@ -5,18 +5,15 @@
 # @Author   : ZhouMiLi
 # @Date     : 2024/12/24
 import os
+import stat
 from datetime import datetime
-import shutil
+
 from sqlalchemy import Engine
 from sqlalchemy.orm import sessionmaker
 from wcferry import Wcf
 
 from plugins.keyword.params import KeyWordParams
 from storage.tables.entity.chat import ChatStatus, ChatFile
-
-auto_download = False
-msg_dict = {}
-conn = None
 
 
 def execute(param: KeyWordParams) -> bool:
@@ -48,8 +45,8 @@ def __download_attach(wcf: Wcf, id: int, thumb: str, extra: str, move_path: str)
         mp4_name = str(os.path.splitext(image_name)[0]) + ".mp4"
         mp4 = file_path + "/" + mp4_name
         new_mp4 = os.path.join(move_path, mp4_name)
-        shutil.copyfile(mp4, new_mp4)
-        os.remove(mp4)
+        os.chmod(mp4, stat.S_IWRITE)
+        os.rename(mp4, new_mp4)
         return new_mp4
     return ""
 
