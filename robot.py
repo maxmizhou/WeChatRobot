@@ -315,7 +315,8 @@ class Robot(Job):
             plugin_dir = plugin.path
             params = plugin.params
             if not receiver or len(str(receiver)) <= 0:
-                self.onEveryTime(corn, self.execute_corn, receiver=receiver, plugin_dir=plugin_dir, params=params)
+                continue
+            self.onEveryTime(corn, self.execute_corn, receiver=receiver, plugin_dir=plugin_dir, params=params)
 
     def execute_corn(self, receiver, plugin_dir, params):
         spec = importlib.util.spec_from_file_location("execute", plugin_dir)
